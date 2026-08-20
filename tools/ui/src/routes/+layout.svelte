@@ -32,8 +32,10 @@
 		deviceStore,
 		mcpStore,
 		modelsStore,
+		NEW_CHAT_TAB_ID,
 		serverStore,
 		settingsStore,
+		tabsStore,
 		versionStore
 	} from '$lib/stores';
 	import { initStores } from '$lib/stores/init';
@@ -104,9 +106,24 @@
 		if (targetIdx >= 0 && targetIdx < allConvs.length) {
 			goto(RouterService.chat(allConvs[targetIdx].id));
 		} else {
-			conversationsStore.openNewChatTab();
+			conversationsStore.openNewChat();
 		}
 	}
+
+	// navigating away from the new-chat screen drops its tab, so it does not
+	// linger once the user moves to a real conversation or another route
+	let previousChatId = $state<string | undefined>(undefined);
+
+	$effect(() => {
+		const id = page.params.id ?? (page.route.id === '/(chat)' ? NEW_CHAT_TAB_ID : undefined);
+		const prev = previousChatId;
+
+		previousChatId = id;
+
+		if (id !== prev && prev && settingsStore.config.conversationTabs && prev === NEW_CHAT_TAB_ID) {
+			untrack(() => tabsStore.removeTabs([NEW_CHAT_TAB_ID]));
+		}
+	});
 
 	// Global drag-and-drop import (works on any route)
 	const dropImport = useDropImport();
