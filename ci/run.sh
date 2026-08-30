@@ -66,7 +66,7 @@ cd $sd/../
 SRC=`pwd`
 
 CMAKE_EXTRA="-DLLAMA_FATAL_WARNINGS=${LLAMA_FATAL_WARNINGS:-ON} -DLLAMA_OPENSSL=OFF -DGGML_SCHED_NO_REALLOC=ON"
-CTEST_EXTRA=""
+CTEST_EXCLUDE_EXTRA=""
 
 # Default to use make unless specified for compatibility
 CMAKE_GENERATOR="Unix Makefiles"
@@ -189,11 +189,26 @@ if [ ! -z ${GG_BUILD_OPENVINO} ]; then
     fi
     CMAKE_EXTRA="${CMAKE_EXTRA} -DGGML_OPENVINO=ON"
 
-    # TODO: fix and re-enable the `test-llama-archs` and `test-recurrent-state-rollback*`
-    CTEST_EXTRA="-E test-llama-archs|^test-recurrent-state-rollback"
+    # TODO: fix and re-enable `test-llama-archs`, `test-recurrent-state-rollback*` and `test-save-load-state`
+    #       test-save-load-state aborts on hybrid recurrent archs, ref https://github.com/ggml-org/llama.cpp/issues/28048
+    CTEST_EXCLUDE_EXTRA="test-llama-archs|^test-recurrent-state-rollback|^test-save-load-state"
 fi
 
 ## helpers
+
+# ctest only honors the last -E on the command line, so all exclusions have to be
+# merged into one pattern. usage: ctest ... $(gg_ctest_exclude "<base pattern>")
+function gg_ctest_exclude {
+    local pattern=$1
+
+    if [ ! -z "${CTEST_EXCLUDE_EXTRA}" ]; then
+        pattern="${pattern:+${pattern}|}${CTEST_EXCLUDE_EXTRA}"
+    fi
+
+    if [ ! -z "${pattern}" ]; then
+        printf -- '-E %s' "${pattern}"
+    fi
+}
 
 # download a file if it does not exist or if it is outdated
 function gg_wget {
@@ -250,7 +265,7 @@ function gg_run_ctest_debug {
     (cmake -G "${CMAKE_GENERATOR}" -DCMAKE_BUILD_TYPE=Debug ${CMAKE_EXTRA} .. ) 2>&1 | tee -a $OUT/${ci}-cmake.log
     (time cmake --build . --config Debug -j$(nproc)) 2>&1 | tee -a $OUT/${ci}-make.log
 
-    (time ctest -C Debug --output-on-failure -L main -E "test-opt|test-backend-ops|test-llama-archs" ${CTEST_EXTRA}) 2>&1 | tee -a $OUT/${ci}-ctest.log
+    (time ctest -C Debug --output-on-failure -L main $(gg_ctest_exclude "test-opt|test-backend-ops|test-llama-archs")) 2>&1 | tee -a $OUT/${ci}-ctest.log
 
     set +e
 }
@@ -282,9 +297,9 @@ function gg_run_ctest_release {
     (time cmake --build . --config Release -j$(nproc)) 2>&1 | tee -a $OUT/${ci}-make.log
 
     if [ -z ${GG_BUILD_LOW_PERF} ]; then
-        (time ctest -C Release --output-on-failure -L 'main|python' ${CTEST_EXTRA}) 2>&1 | tee -a $OUT/${ci}-ctest.log
+        (time ctest -C Release --output-on-failure -L 'main|python' $(gg_ctest_exclude "")) 2>&1 | tee -a $OUT/${ci}-ctest.log
     else
-        (time ctest -C Release --output-on-failure -L main -E test-opt ${CTEST_EXTRA}) 2>&1 | tee -a $OUT/${ci}-ctest.log
+        (time ctest -C Release --output-on-failure -L main $(gg_ctest_exclude "test-opt")) 2>&1 | tee -a $OUT/${ci}-ctest.log
     fi
 
     set +e
